@@ -44,6 +44,39 @@ def check_status():
         print(f"\n❌ STATUS CHECK CRASHED: {str(e)}\n")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/lifecycle', methods=['POST'])
+def update_lifecycle():
+    try:
+        from google.cloud import storage
+        from datetime import datetime, timezone, timedelta
+        
+        client = storage.Client()
+        bucket = client.bucket("secure-dr-vault-shaurya-2026")
+        
+        # Enterprise Note: Native GCP Lifecycle rules require a minimum of 1 Day.
+        # For this demo, we run a custom active-purge script for a 30-minute window.
+        
+        blobs = bucket.list_blobs(versions=True)
+        now = datetime.now(timezone.utc)
+        deleted_count = 0
+        
+        for blob in blobs:
+            # In GCP, 'time_deleted' is only populated if the version is non-current.
+            # This ensures we NEVER delete the live file.
+            if blob.time_deleted is not None:
+                age = now - blob.time_deleted
+                # If the corrupted version is older than 30 minutes, permanently destroy it
+                if age > timedelta(minutes=30):
+                    blob.delete()
+                    deleted_count += 1
+        
+        print(f"Aggressive Purge Complete. Removed {deleted_count} old versions.")
+        return jsonify({"status": "success", "message": f"Purged {deleted_count} versions older than 30 mins."})
+        
+    except Exception as e:
+        print(f"Lifecycle error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == '__main__':
     print("🛡️ Security API is online and listening on Port 5001...")
     # Debug mode is ON so it auto-reloads and shows errors
